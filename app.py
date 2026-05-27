@@ -40,21 +40,17 @@ df = df_raw.copy()
 df["InvoiceDate"] = pd.to_datetime(df["InvoiceDate"], errors="coerce")
 df["CustomerID"] = df["CustomerID"].astype("Int64")
 
-# Basic cleaning
 df = df.dropna(subset=["CustomerID", "InvoiceDate", "Description"])
 df = df[df["Quantity"] > 0]
 df = df[df["UnitPrice"] > 0]
 
-# Revenue
 df["Revenue"] = df["Quantity"] * df["UnitPrice"]
 
-# Time variables
 df["InvoiceMonth"] = df["InvoiceDate"].dt.to_period("M").astype(str)
 df["InvoiceDateOnly"] = df["InvoiceDate"].dt.date
 df["InvoiceDay"] = df["InvoiceDate"].dt.day_name()
 df["InvoiceHour"] = df["InvoiceDate"].dt.hour
 
-# Order-level table
 order_df = df.groupby("InvoiceNo").agg(
     Order_Revenue=("Revenue", "sum"),
     Order_Quantity=("Quantity", "sum"),
@@ -63,12 +59,7 @@ order_df = df.groupby("InvoiceNo").agg(
     InvoiceDate=("InvoiceDate", "first")
 ).reset_index()
 
-# Visual capped versions only for readability of boxplots and scatter plots
-df_visual = df[df["Revenue"] <= df["Revenue"].quantile(0.99)].copy()
-order_visual = order_df[
-    (order_df["Order_Revenue"] <= order_df["Order_Revenue"].quantile(0.99)) &
-    (order_df["Order_Quantity"] <= order_df["Order_Quantity"].quantile(0.99))
-].copy()
+order_df["Average_Item_Value"] = order_df["Order_Revenue"] / order_df["Order_Quantity"]
 
 
 # --------------------------------------------------
@@ -109,22 +100,10 @@ df_filtered = df[
     & (df["InvoiceDate"].dt.date <= end_date)
 ].copy()
 
-df_visual_filtered = df_visual[
-    (df_visual["Country"].isin(selected_countries))
-    & (df_visual["InvoiceDate"].dt.date >= start_date)
-    & (df_visual["InvoiceDate"].dt.date <= end_date)
-].copy()
-
 order_filtered = order_df[
     (order_df["Country"].isin(selected_countries))
     & (order_df["InvoiceDate"].dt.date >= start_date)
     & (order_df["InvoiceDate"].dt.date <= end_date)
-].copy()
-
-order_visual_filtered = order_visual[
-    (order_visual["Country"].isin(selected_countries))
-    & (order_visual["InvoiceDate"].dt.date >= start_date)
-    & (order_visual["InvoiceDate"].dt.date <= end_date)
 ].copy()
 
 if df_filtered.empty:
@@ -140,18 +119,15 @@ st.title("E-Commerce Sales & Customer Segmentation Dashboard")
 st.subheader("Sales Performance, Product Analysis, Market Analysis and RFM Segmentation")
 
 st.markdown("""
-This project analyzes the **Online Retail** dataset obtained from the **UCI Machine Learning Repository**.
+This project analyzes the **Online Retail** dataset from the **UCI Machine Learning Repository**.
 
 The dataset contains transaction-level sales data for a **UK-based non-store online retail company**
 between December 2010 and December 2011. The company mainly sells unique all-occasion gift products,
-and many of its customers are wholesalers.
+and many customers are wholesalers.
 
-Because the company is based in the United Kingdom, the United Kingdom naturally appears as the dominant market
-in the data. Therefore, if the UK generates the highest revenue, this should not be interpreted as a global market
-comparison. It mainly reflects the retailer's home-market concentration and its likely domestic customer base.
-
-This dashboard analyzes sales performance, product revenue, customer value, country-level markets,
-RFM segmentation, and customer clusters.
+Because the retailer is based in the United Kingdom, the UK is expected to dominate the dataset.
+The country analysis should therefore be interpreted as a company-level market structure, not as a global
+ranking of e-commerce markets.
 """)
 
 
@@ -212,10 +188,9 @@ st.markdown("---")
 st.subheader("Dataset Overview")
 
 st.markdown("""
-The dataset contains transaction-level information, including invoice number, product code,
-product description, quantity, invoice date, unit price, customer ID, and country.
+The dataset contains invoice, product, quantity, date, price, customer, and country information.
 
-Rows with missing customer IDs, negative quantities, cancellations, and non-positive unit prices are removed
+The cleaning process removes missing customer IDs, cancellations, negative quantities, and non-positive prices
 to focus on completed purchase transactions.
 """)
 
@@ -228,7 +203,7 @@ with st.expander("View variable types"):
 dataset_summary = pd.DataFrame({
     "Indicator": [
         "Raw transaction lines",
-        "Cleaned transaction lines",
+        "Cleaned transaction lines after filters",
         "Unique invoices",
         "Unique customers",
         "Unique products",
@@ -261,15 +236,13 @@ st.header("1. How are overall sales performing?")
 
 st.markdown("""
 ### Research Question
-How are overall sales performing in terms of revenue, orders, customers, products, and average order value?
+How are overall sales performing in terms of revenue, orders, customers, products, and order size?
 
 ### Objective
-The objective is to summarize the overall commercial performance of the e-commerce business.
+The objective is to summarize the commercial performance of the online retailer.
 
 ### Method
-We calculate key performance indicators including total revenue, number of orders, number of customers,
-number of products sold, total quantity, and average order value. We also examine order size, hourly performance,
-and weekday performance.
+We calculate sales KPIs and analyze the largest orders, order quantities, revenue by hour, and revenue by weekday.
 """)
 
 sales_summary = pd.DataFrame({
@@ -294,35 +267,38 @@ sales_summary = pd.DataFrame({
 st.markdown("### Results: Sales Performance Summary")
 st.dataframe(sales_summary)
 
-st.markdown("### Results: Order Value and Order Quantity Distribution")
+top_orders_revenue = order_filtered.sort_values("Order_Revenue", ascending=False).head(15)
+top_orders_quantity = order_filtered.sort_values("Order_Quantity", ascending=False).head(15)
 
 col1, col2 = st.columns(2)
 
 with col1:
-    fig_order_revenue_box = px.box(
-        order_visual_filtered,
-        y="Order_Revenue",
-        points="outliers",
-        title="Order Revenue Distribution",
-        labels={"Order_Revenue": "Order Revenue"}
+    fig_top_order_revenue = px.bar(
+        top_orders_revenue.sort_values("Order_Revenue", ascending=True),
+        x="Order_Revenue",
+        y="InvoiceNo",
+        orientation="h",
+        title="Top 15 Orders by Revenue"
     )
-    st.plotly_chart(fig_order_revenue_box, use_container_width=True)
+    st.plotly_chart(fig_top_order_revenue, use_container_width=True)
 
 with col2:
-    fig_order_quantity_box = px.box(
-        order_visual_filtered,
-        y="Order_Quantity",
-        points="outliers",
-        title="Order Quantity Distribution",
-        labels={"Order_Quantity": "Order Quantity"}
+    fig_top_order_quantity = px.bar(
+        top_orders_quantity.sort_values("Order_Quantity", ascending=True),
+        x="Order_Quantity",
+        y="InvoiceNo",
+        orientation="h",
+        title="Top 15 Orders by Quantity"
     )
-    st.plotly_chart(fig_order_quantity_box, use_container_width=True)
+    st.plotly_chart(fig_top_order_quantity, use_container_width=True)
 
-st.markdown("""
-The boxplots show the distribution of order revenue and order quantity without using a `count` axis.
-They help identify the median order, the spread of orders, and unusually large transactions.
-The charts are visually capped at the 99th percentile to make the central distribution easier to read.
-""")
+top_order_id = top_orders_revenue.iloc[0]["InvoiceNo"]
+top_order_revenue = top_orders_revenue.iloc[0]["Order_Revenue"]
+top_order_country = top_orders_revenue.iloc[0]["Country"]
+
+top_quantity_order_id = top_orders_quantity.iloc[0]["InvoiceNo"]
+top_quantity_value = top_orders_quantity.iloc[0]["Order_Quantity"]
+top_quantity_country = top_orders_quantity.iloc[0]["Country"]
 
 col1, col2 = st.columns(2)
 
@@ -349,7 +325,7 @@ with col1:
         mode="markers+text",
         text=[f"Peak: {best_hour}:00"],
         textposition="top center",
-        marker=dict(size=14)
+        marker=dict(size=16)
     )
 
     st.plotly_chart(fig_hour, use_container_width=True)
@@ -387,7 +363,7 @@ with col2:
         mode="markers+text",
         text=[f"Peak: {best_day}"],
         textposition="top center",
-        marker=dict(size=14)
+        marker=dict(size=16)
     )
 
     st.plotly_chart(fig_day, use_container_width=True)
@@ -395,18 +371,20 @@ with col2:
 st.markdown(f"""
 ### Interpretation
 
-The filtered data show total revenue of **${total_revenue:,.0f}** generated from **{total_orders:,} orders**
-and **{total_customers:,} customers**.
+The retailer generated **${total_revenue:,.0f}** from **{total_orders:,} orders** and **{total_customers:,} customers**.
+The average order value is **${average_order_value:,.2f}**.
 
-The average order value is **${average_order_value:,.2f}**, which represents the average revenue generated per invoice.
+The largest order is invoice **{top_order_id}**, from **{top_order_country}**, with revenue of **${top_order_revenue:,.0f}**.
+The largest order by quantity is invoice **{top_quantity_order_id}**, from **{top_quantity_country}**, with **{top_quantity_value:,.0f} units**.
+
+These large orders are important because they may represent wholesale purchases. Since the company has many wholesale customers,
+a small number of large invoices can strongly affect revenue performance.
 
 The strongest revenue hour is around **{best_hour}:00**, generating **${best_hour_revenue:,.0f}**.
-This may reflect the time when customers or wholesale buyers are most active, possibly during business hours
-or during the period when orders are processed by the retailer.
+This concentration may reflect business-hour ordering behavior, especially if many customers are wholesalers.
 
 The strongest revenue day is **{best_day}**, generating **${best_day_revenue:,.0f}**.
-This may be linked to weekly purchasing routines, business-to-business ordering behavior, or operational cycles.
-For a retailer with many wholesale customers, orders may concentrate during specific working days rather than weekends.
+This may reflect weekly ordering routines, inventory restocking cycles, or operational patterns in the retailer's order processing.
 """)
 
 
@@ -457,7 +435,7 @@ fig_monthly_revenue.add_scatter(
     mode="markers+text",
     text=[f"Peak: {best_month}"],
     textposition="top center",
-    marker=dict(size=14)
+    marker=dict(size=16)
 )
 
 st.plotly_chart(fig_monthly_revenue, use_container_width=True)
@@ -483,7 +461,7 @@ with col1:
         mode="markers+text",
         text=[f"Peak: {best_order_month}"],
         textposition="top center",
-        marker=dict(size=14)
+        marker=dict(size=16)
     )
 
     st.plotly_chart(fig_monthly_orders, use_container_width=True)
@@ -507,7 +485,7 @@ with col2:
         mode="markers+text",
         text=[f"Peak: {best_customer_month}"],
         textposition="top center",
-        marker=dict(size=14)
+        marker=dict(size=16)
     )
 
     st.plotly_chart(fig_monthly_customers, use_container_width=True)
@@ -525,18 +503,13 @@ st.markdown(f"""
 ### Interpretation
 
 The highest revenue month is **{best_month}**, with total revenue of **${best_month_revenue:,.0f}**.
+The highest order volume occurs in **{best_order_month}**, while the highest number of active customers occurs in **{best_customer_month}**.
 
-A monthly peak may be explained by several business factors. For a gift-products retailer, stronger sales can occur
-before end-of-year holidays, Christmas preparation, seasonal promotions, or wholesale restocking periods.
-If revenue rises together with orders and active customers, the increase likely reflects broader demand.
-If revenue rises while the number of orders remains stable, the increase may instead come from larger order values.
+For a gift-products retailer, this seasonal pattern can be linked to end-of-year demand, Christmas preparation,
+holiday gifting, promotional campaigns, or wholesale restocking before peak retail periods.
 
-The comparison between revenue, orders, customers, and average order value is important because sales growth can come from:
-- more customers;
-- more frequent orders;
-- larger orders;
-- higher-value products;
-- seasonal or promotional effects.
+If revenue and orders rise together, the increase is likely driven by stronger demand.
+If revenue rises more than orders, it may indicate larger order sizes, higher-value products, or more wholesale activity.
 """)
 
 
@@ -565,6 +538,8 @@ product_summary = df_filtered.groupby("Description").agg(
     Orders=("InvoiceNo", "nunique"),
     Average_UnitPrice=("UnitPrice", "mean")
 ).reset_index()
+
+product_summary["Revenue_Share"] = product_summary["Revenue"] / product_summary["Revenue"].sum()
 
 top_revenue_products = product_summary.sort_values("Revenue", ascending=False).head(15)
 top_quantity_products = product_summary.sort_values("Quantity", ascending=False).head(15)
@@ -609,27 +584,41 @@ fig_product_quantity_revenue = px.scatter(
     x="Quantity",
     y="Revenue",
     size="Average_UnitPrice",
-    size_max=45,
+    size_max=50,
     hover_name="Description",
     title="Top Products: Quantity Sold vs Revenue"
 )
 st.plotly_chart(fig_product_quantity_revenue, use_container_width=True)
 
-top_product_name = top_revenue_products.iloc[0]["Description"]
-top_product_revenue = top_revenue_products.iloc[0]["Revenue"]
+top_product = top_revenue_products.iloc[0]
+top_product_name = top_product["Description"]
+top_product_revenue = top_product["Revenue"]
+top_product_quantity = top_product["Quantity"]
+top_product_share = top_product["Revenue_Share"] * 100
+
+top_quantity_product = top_quantity_products.iloc[0]
+top_quantity_product_name = top_quantity_product["Description"]
+top_quantity_product_quantity = top_quantity_product["Quantity"]
+top_quantity_product_revenue = top_quantity_product["Revenue"]
+
+top5_product_share = product_summary.sort_values("Revenue", ascending=False).head(5)["Revenue"].sum() / product_summary["Revenue"].sum() * 100
 
 st.markdown(f"""
 ### Interpretation
 
-The product generating the highest revenue is **{top_product_name}**, with total revenue of **${top_product_revenue:,.0f}**.
+The strongest product by revenue is **{top_product_name}**, generating **${top_product_revenue:,.0f}**.
+It sold **{top_product_quantity:,.0f} units** and represents approximately **{top_product_share:.1f}%** of total revenue.
 
-Products with high revenue are not always the same as products with the highest quantities sold.
-A product may generate high revenue because it has a higher unit price, while another product may generate high quantity
-because it is inexpensive and frequently purchased.
+The product with the highest quantity sold is **{top_quantity_product_name}**, with **{top_quantity_product_quantity:,.0f} units** sold
+and revenue of **${top_quantity_product_revenue:,.0f}**.
 
-The treemap helps detect product concentration. If a small number of products occupy most of the treemap,
-the business may depend heavily on a limited set of products. This can be positive for focus, but risky if demand
-for those products declines.
+This distinction is important: **{top_product_name}** is the strongest revenue product, while **{top_quantity_product_name}**
+is the strongest volume product. The first one matters more for revenue concentration, while the second one matters more
+for inventory movement and operational planning.
+
+The top five products generate approximately **{top5_product_share:.1f}%** of total revenue.
+If this share is high, the retailer depends strongly on a small group of products. This can be useful for focused promotion,
+but it also creates risk if demand for these specific products declines.
 """)
 
 
@@ -649,10 +638,6 @@ The objective is to identify the most important geographic markets for the e-com
 
 ### Method
 We aggregate revenue, orders, customers, quantity, average order value, and average revenue per customer by country.
-
-Important clarification: because the retailer is UK-based, the United Kingdom is expected to dominate the data.
-Therefore, the UK result should be interpreted as the company's home-market concentration rather than as evidence
-that the UK is necessarily the most attractive global e-commerce market.
 """)
 
 country_summary = df_filtered.groupby("Country").agg(
@@ -662,13 +647,9 @@ country_summary = df_filtered.groupby("Country").agg(
     Quantity=("Quantity", "sum")
 ).reset_index()
 
-country_summary["Average_Revenue_Per_Customer"] = (
-    country_summary["Revenue"] / country_summary["Customers"]
-)
-
-country_summary["Average_Order_Value"] = (
-    country_summary["Revenue"] / country_summary["Orders"]
-)
+country_summary["Average_Revenue_Per_Customer"] = country_summary["Revenue"] / country_summary["Customers"]
+country_summary["Average_Order_Value"] = country_summary["Revenue"] / country_summary["Orders"]
+country_summary["Revenue_Share"] = country_summary["Revenue"] / country_summary["Revenue"].sum()
 
 country_summary = country_summary.sort_values("Revenue", ascending=False)
 
@@ -717,21 +698,43 @@ fig_country_treemap = px.treemap(
 )
 st.plotly_chart(fig_country_treemap, use_container_width=True)
 
-top_country = country_summary.iloc[0]["Country"]
-top_country_revenue = country_summary.iloc[0]["Revenue"]
+top_country = country_summary.iloc[0]
+top_country_name = top_country["Country"]
+top_country_revenue = top_country["Revenue"]
+top_country_share = top_country["Revenue_Share"] * 100
+
+non_uk = country_summary[country_summary["Country"] != "United Kingdom"]
+if not non_uk.empty:
+    top_non_uk = non_uk.iloc[0]
+    top_non_uk_name = top_non_uk["Country"]
+    top_non_uk_revenue = top_non_uk["Revenue"]
+else:
+    top_non_uk_name = "N/A"
+    top_non_uk_revenue = 0
+
+premium_country = country_summary[country_summary["Customers"] >= 3].sort_values(
+    "Average_Order_Value",
+    ascending=False
+).iloc[0]
+
+premium_country_name = premium_country["Country"]
+premium_country_aov = premium_country["Average_Order_Value"]
 
 st.markdown(f"""
 ### Interpretation
 
-The strongest market by revenue is **{top_country}**, generating **${top_country_revenue:,.0f}**.
+The strongest country by revenue is **{top_country_name}**, generating **${top_country_revenue:,.0f}**,
+or approximately **{top_country_share:.1f}%** of total revenue.
 
-If the United Kingdom appears first, this is expected because the dataset comes from a UK-based online retailer.
-Therefore, the result mainly reflects home-market concentration.
+This result should be read carefully. Since the retailer is UK-based, the dominance of **{top_country_name}**
+mainly reflects the company's home-market concentration.
 
-Countries with high revenue and many customers can be considered core markets.
-Countries with fewer customers but high average order value may represent premium or wholesale-oriented markets.
+Outside the UK, the strongest revenue market is **{top_non_uk_name}**, with revenue of **${top_non_uk_revenue:,.0f}**.
+This country is more useful for evaluating international demand.
 
-This analysis can support decisions about geographic targeting, logistics, customer service, and international expansion.
+The country with the highest average order value among markets with at least three customers is **{premium_country_name}**,
+with an average order value of **${premium_country_aov:,.2f}**.
+This may indicate a smaller but higher-value market, possibly driven by wholesale or larger basket purchases.
 """)
 
 
@@ -762,9 +765,8 @@ customer_summary = df_filtered.groupby("CustomerID").agg(
     Country=("Country", "first")
 ).reset_index()
 
-customer_summary["Average_Order_Value"] = (
-    customer_summary["Revenue"] / customer_summary["Orders"]
-)
+customer_summary["Average_Order_Value"] = customer_summary["Revenue"] / customer_summary["Orders"]
+customer_summary["Revenue_Share"] = customer_summary["Revenue"] / customer_summary["Revenue"].sum()
 
 top_customers = customer_summary.sort_values("Revenue", ascending=False).head(15)
 
@@ -785,56 +787,41 @@ customer_visual = customer_summary[
     (customer_summary["Orders"] <= customer_summary["Orders"].quantile(0.99))
 ].copy()
 
-col1, col2 = st.columns(2)
-
-with col1:
-    fig_customer_revenue_box = px.box(
-        customer_visual,
-        y="Revenue",
-        points="outliers",
-        title="Customer Revenue Distribution",
-        labels={"Revenue": "Customer Revenue"}
-    )
-    st.plotly_chart(fig_customer_revenue_box, use_container_width=True)
-
-with col2:
-    fig_customer_orders_box = px.box(
-        customer_visual,
-        y="Orders",
-        points="outliers",
-        title="Orders per Customer Distribution",
-        labels={"Orders": "Orders per Customer"}
-    )
-    st.plotly_chart(fig_customer_orders_box, use_container_width=True)
-
 fig_customer_scatter = px.scatter(
     customer_visual,
     x="Orders",
     y="Revenue",
     size="Average_Order_Value",
-    size_max=45,
+    size_max=55,
     color="Country",
     hover_data=["CustomerID", "Products", "Average_Order_Value"],
     title="Customer Value: Orders vs Revenue"
 )
 st.plotly_chart(fig_customer_scatter, use_container_width=True)
 
-top_customer = top_customers.iloc[0]["CustomerID"]
-top_customer_revenue = top_customers.iloc[0]["Revenue"]
+customer_top20_share = customer_summary.sort_values("Revenue", ascending=False).head(20)["Revenue"].sum() / customer_summary["Revenue"].sum() * 100
+
+top_customer = top_customers.iloc[0]
+top_customer_id = top_customer["CustomerID"]
+top_customer_revenue = top_customer["Revenue"]
+top_customer_orders = top_customer["Orders"]
+top_customer_country = top_customer["Country"]
+top_customer_share = top_customer["Revenue_Share"] * 100
 
 st.markdown(f"""
 ### Interpretation
 
-The highest-value customer in the selected data is customer **{top_customer}**, generating **${top_customer_revenue:,.0f}** in revenue.
+The highest-value customer is **{top_customer_id}** from **{top_customer_country}**.
+This customer generated **${top_customer_revenue:,.0f}** across **{top_customer_orders:,} orders**,
+representing approximately **{top_customer_share:.1f}%** of total revenue.
 
-The customer revenue boxplot shows whether revenue is concentrated among a small number of customers.
-In many e-commerce businesses, a small number of customers, especially repeat buyers or wholesalers, generate a large share of sales.
+The top 20 customers generate approximately **{customer_top20_share:.1f}%** of total revenue.
+This indicates whether the business is highly dependent on a small group of customers.
 
-The scatter plot compares the number of orders with total revenue.
-Large points represent customers with higher average order values. This helps distinguish:
-- frequent customers with many orders;
-- high-ticket customers with fewer but larger orders;
-- low-value customers with limited purchasing activity.
+In the scatter plot, customers with many orders and high revenue are loyal high-value customers.
+Customers with fewer orders but high revenue may be wholesale or large-basket buyers.
+These customers should be treated differently: frequent buyers need loyalty management, while large-basket buyers may need
+personalized account management or volume-based offers.
 """)
 
 
@@ -853,14 +840,13 @@ Can customers be segmented based on recency, frequency, and monetary value?
 The objective is to classify customers based on their purchasing behavior and identify meaningful customer segments.
 
 ### Method
-We use RFM analysis:
+RFM analysis uses three dimensions:
 
 - **Recency:** how recently the customer purchased. Lower recency means the customer bought more recently.
 - **Frequency:** how often the customer purchased. Higher frequency means stronger repeat-purchase behavior.
-- **Monetary:** how much revenue the customer generated. Higher monetary value means higher customer value.
+- **Monetary:** how much revenue the customer generated. Higher monetary value means stronger customer value.
 
-Customers receive scores from 1 to 5 for each dimension.
-A high RFM score generally indicates a customer who is recent, frequent, and valuable.
+Each customer receives a score from 1 to 5 for each dimension.
 """)
 
 snapshot_date = df_filtered["InvoiceDate"].max() + pd.Timedelta(days=1)
@@ -954,43 +940,49 @@ fig_rfm_scatter = px.scatter(
     y="Monetary",
     color="RFM_Segment",
     size="Monetary",
-    size_max=45,
+    size_max=55,
     hover_data=["CustomerID", "Recency", "RFM_Score"],
     title="RFM Segments: Frequency vs Monetary Value"
 )
 st.plotly_chart(fig_rfm_scatter, use_container_width=True)
 
-fig_rfm_recency = px.box(
-    rfm,
-    x="RFM_Segment",
-    y="Recency",
-    title="Recency Distribution by RFM Segment"
-)
-st.plotly_chart(fig_rfm_recency, use_container_width=True)
+top_rfm_segment = rfm_segment_summary.iloc[0]
+top_rfm_segment_name = top_rfm_segment["RFM_Segment"]
+top_rfm_revenue = top_rfm_segment["Total_Revenue"]
+top_rfm_customers = top_rfm_segment["Customers"]
 
-top_rfm_segment = rfm_segment_summary.iloc[0]["RFM_Segment"]
-top_rfm_revenue = rfm_segment_summary.iloc[0]["Total_Revenue"]
+largest_segment = rfm_segment_summary.sort_values("Customers", ascending=False).iloc[0]
+largest_segment_name = largest_segment["RFM_Segment"]
+largest_segment_customers = largest_segment["Customers"]
+
+inactive_segment = rfm_segment_summary[rfm_segment_summary["RFM_Segment"] == "Inactive"]
+
+if not inactive_segment.empty:
+    inactive_customers = int(inactive_segment.iloc[0]["Customers"])
+    inactive_revenue = inactive_segment.iloc[0]["Total_Revenue"]
+else:
+    inactive_customers = 0
+    inactive_revenue = 0
 
 st.markdown(f"""
 ### Interpretation
 
-The RFM analysis separates customers according to how recently they purchased, how frequently they purchase,
-and how much revenue they generate.
+The segment generating the highest revenue is **{top_rfm_segment_name}**, with **{top_rfm_customers:,} customers**
+and total revenue of **${top_rfm_revenue:,.0f}**.
 
-The segment generating the highest revenue is **{top_rfm_segment}**, with total revenue of **${top_rfm_revenue:,.0f}**.
+The largest segment by number of customers is **{largest_segment_name}**, with **{largest_segment_customers:,} customers**.
+This distinction matters because the largest segment is not always the most profitable segment.
 
-The main segment meanings are:
+The inactive segment contains **{inactive_customers:,} customers** and generated **${inactive_revenue:,.0f}**.
+If this group is large, the retailer may have a reactivation opportunity.
 
-- **Champions:** recent, frequent, and high-spending customers. These are the most valuable customers and should be protected.
-- **Loyal High-Value:** customers who buy frequently and generate high revenue, even if they are not always the most recent.
-- **Big Spenders:** customers with high monetary value, but not necessarily frequent or recent.
-- **At Risk Loyal:** customers who used to buy frequently but have not purchased recently. These are important for reactivation.
-- **New or Recent:** customers who purchased recently but may not yet have high frequency or monetary value.
-- **Inactive:** customers with weak recent activity and low purchase frequency.
-
-RFM is useful because it translates transaction data into marketing actions.
-For example, champions can receive loyalty rewards, inactive customers can receive reactivation campaigns,
-and recent customers can receive onboarding or second-purchase offers.
+RFM translates sales history into marketing action:
+- **Champions** should receive loyalty rewards and early access to new products.
+- **Loyal High-Value** customers should receive personalized offers and retention attention.
+- **Big Spenders** may respond well to premium bundles or volume incentives.
+- **At Risk Loyal** customers should receive reactivation messages before they become inactive.
+- **New or Recent** customers should receive second-purchase offers.
+- **Inactive** customers should be targeted only if the expected reactivation value exceeds the campaign cost.
 """)
 
 
@@ -1009,8 +1001,8 @@ Can customers be grouped into data-driven segments based on their RFM behavior?
 The objective is to create customer groups using unsupervised machine learning.
 
 ### Method
-We apply K-means clustering to Recency, Frequency, and Monetary values after standardization.
-Unlike RFM rules, K-means does not use predefined labels. It groups customers based on similarity in the data.
+K-means clustering groups customers based on similarity in Recency, Frequency, and Monetary value after standardization.
+Unlike RFM labels, K-means does not assign predefined marketing categories. The interpretation comes from the profile of each cluster.
 """)
 
 cluster_df = rfm[["Recency", "Frequency", "Monetary"]].copy()
@@ -1047,7 +1039,7 @@ else:
             y="Monetary",
             color="Cluster",
             size="Monetary",
-            size_max=45,
+            size_max=55,
             hover_data=["CustomerID", "Recency", "RFM_Segment"],
             title="Customer Clusters: Frequency vs Monetary Value"
         )
@@ -1059,7 +1051,7 @@ else:
             y="Monetary",
             color="Cluster",
             size="Frequency",
-            size_max=45,
+            size_max=55,
             hover_data=["CustomerID", "RFM_Segment"],
             title="Customer Clusters: Recency vs Monetary Value"
         )
@@ -1086,26 +1078,24 @@ else:
         )
         st.plotly_chart(fig_cluster_profile, use_container_width=True)
 
-        best_cluster = cluster_summary.sort_values("Average_Monetary", ascending=False).iloc[0]["Cluster"]
-        inactive_cluster = cluster_summary.sort_values("Average_Recency", ascending=False).iloc[0]["Cluster"]
-        frequent_cluster = cluster_summary.sort_values("Average_Frequency", ascending=False).iloc[0]["Cluster"]
+        best_cluster = cluster_summary.sort_values("Average_Monetary", ascending=False).iloc[0]
+        inactive_cluster = cluster_summary.sort_values("Average_Recency", ascending=False).iloc[0]
+        frequent_cluster = cluster_summary.sort_values("Average_Frequency", ascending=False).iloc[0]
 
         st.markdown(f"""
         ### Interpretation
 
-        K-means clustering identifies four customer groups based on similarity in recency, frequency, and monetary value.
+        Cluster **{int(best_cluster["Cluster"])}** has the highest average monetary value
+        (**${best_cluster["Average_Monetary"]:,.0f}** per customer). This is the strongest value cluster.
 
-        - Cluster **{best_cluster}** has the highest average monetary value and can be interpreted as a high-value customer group.
-        - Cluster **{frequent_cluster}** has the highest average frequency and represents the most frequent buyers.
-        - Cluster **{inactive_cluster}** has the highest average recency, meaning customers in this group have not purchased recently.
+        Cluster **{int(frequent_cluster["Cluster"])}** has the highest average frequency
+        (**{frequent_cluster["Average_Frequency"]:.1f} orders per customer**). This group represents the most frequent buyers.
 
-        The difference between RFM and K-means is important:
+        Cluster **{int(inactive_cluster["Cluster"])}** has the highest average recency
+        (**{inactive_cluster["Average_Recency"]:.1f} days** since last purchase). This group is the least recent and may require reactivation.
 
-        - **RFM segmentation** is rule-based and easy to explain to managers.
-        - **K-means segmentation** is data-driven and can detect natural groups in the data.
-
-        In practice, both approaches are complementary. RFM provides clear marketing labels, while K-means confirms
-        whether customers naturally form distinct behavioral groups.
+        RFM provides clear marketing labels. K-means confirms whether customers naturally form groups based on behavior.
+        Used together, they support both managerial communication and data-driven targeting.
         """)
 
     except Exception as e:
@@ -1121,16 +1111,20 @@ st.markdown("---")
 st.header("Managerial Recommendations")
 
 st.markdown("""
-Based on the analysis, the business could consider the following actions:
+Based on the analysis, the retailer could act on four priorities:
 
-1. **Protect high-value customers** through loyalty programs, personalized offers, and priority service.
-2. **Reactivate inactive customers** with targeted email campaigns, discounts, or product recommendations.
-3. **Use RFM segments for campaign design**: champions should receive loyalty rewards, while at-risk customers should receive reactivation offers.
-4. **Prioritize top revenue products** in inventory planning and promotional campaigns.
-5. **Interpret UK dominance carefully**, because the company is UK-based and the dataset reflects its home-market activity.
-6. **Identify premium markets** where revenue per customer or average order value is high even if the number of customers is smaller.
-7. **Monitor monthly, daily, and hourly sales patterns** to anticipate demand and plan campaign timing.
-8. **Combine managerial rules and machine learning** by using RFM for explainability and K-means for data-driven segmentation.
+1. **Protect the revenue engine.**  
+   High-value customers and top revenue products deserve loyalty offers, priority service, and inventory protection.
+
+2. **Turn product concentration into strategy.**  
+   Products that dominate revenue should be promoted carefully, but the retailer should also monitor dependence on a narrow product portfolio.
+
+3. **Treat the UK as the home market, not as a global benchmark.**  
+   The UK dominates because the retailer is UK-based. International markets should be evaluated separately, especially countries with high order value.
+
+4. **Use segmentation for action.**  
+   Champions need loyalty rewards, at-risk loyal customers need reactivation, new customers need second-purchase incentives,
+   and inactive customers need low-cost win-back campaigns.
 """)
 
 
@@ -1142,25 +1136,22 @@ st.markdown("---")
 st.header("Conclusion")
 
 st.markdown("""
-This project shows how raw transaction data can be transformed into a practical e-commerce decision-support system.
+This dashboard transforms a raw transaction file into a complete e-commerce intelligence system.
 
-The dashboard does more than report sales. It connects sales performance, product concentration, market structure,
-customer value, and behavioral segmentation into one analytical workflow.
+It shows where revenue comes from, which products carry the business, which countries matter, which customers create value,
+and which customer groups require different commercial actions.
 
-From a business perspective, the main value of this analysis is that it helps answer four managerial questions:
+The main insight is that the business is not only about total sales. It is about **concentration and timing**:
+a few products, a few customers, specific months, specific days, and specific behavioral segments can shape a large part of performance.
 
-- **Where is revenue coming from?**
-- **Which products and markets deserve attention?**
-- **Which customers should be protected, developed, or reactivated?**
-- **How can transaction data be converted into targeted commercial actions?**
+From a managerial perspective, the dashboard can be used as a decision cockpit:
 
-The analysis also shows why context matters. The United Kingdom dominates the dataset largely because the retailer is UK-based.
-This means the dashboard should be used as a company-level business intelligence tool rather than as a global market ranking.
+- **Sales view:** monitor revenue, orders, and seasonality.
+- **Product view:** protect best sellers and identify dependency risks.
+- **Market view:** separate the UK home-market effect from international opportunities.
+- **Customer view:** identify top customers, inactive customers, and growth segments.
+- **Segmentation view:** convert transactions into targeted marketing actions.
 
-Overall, the project demonstrates a complete business analytics workflow: data cleaning, KPI design, descriptive analysis,
-sales trend analysis, product and country analysis, customer value measurement, RFM segmentation, machine learning clustering,
-and managerial recommendations.
-
-This dashboard complements the previous marketing analytics project by shifting the focus from customer profiles and campaign response
-to transaction-level sales behavior, customer value, and e-commerce segmentation.
+This project complements the previous marketing analytics dashboard by moving from customer-profile analysis
+to transaction-level sales intelligence, customer value management, and e-commerce segmentation.
 """)
