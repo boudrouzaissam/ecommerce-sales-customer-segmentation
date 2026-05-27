@@ -246,7 +246,8 @@ How are overall sales performing in terms of revenue, orders, customers, product
 The objective is to summarize the commercial performance of the online retailer.
 
 ### Method
-We calculate sales KPIs and analyze the largest orders, order quantities, revenue by hour, and revenue by weekday.
+We calculate sales KPIs and analyze order revenue distribution, order quantity distribution,
+revenue by hour, and revenue by weekday.
 """)
 
 sales_summary = pd.DataFrame({
@@ -271,30 +272,44 @@ sales_summary = pd.DataFrame({
 st.markdown("### Results: Sales Performance Summary")
 st.dataframe(sales_summary)
 
+# Order-level distributions
 top_orders_revenue = order_filtered.sort_values("Order_Revenue", ascending=False).head(15)
 top_orders_quantity = order_filtered.sort_values("Order_Quantity", ascending=False).head(15)
+
+order_hist = order_filtered[
+    (order_filtered["Order_Revenue"] <= order_filtered["Order_Revenue"].quantile(0.99))
+    & (order_filtered["Order_Quantity"] <= order_filtered["Order_Quantity"].quantile(0.99))
+].copy()
 
 col1, col2 = st.columns(2)
 
 with col1:
-    fig_top_order_revenue = px.bar(
-        top_orders_revenue.sort_values("Order_Revenue", ascending=True),
+    fig_order_revenue_hist = px.histogram(
+        order_hist,
         x="Order_Revenue",
-        y="InvoiceNo",
-        orientation="h",
-        title="Top 15 Orders by Revenue"
+        nbins=40,
+        title="Distribution of Order Revenue",
+        labels={"Order_Revenue": "Order Revenue"}
     )
-    st.plotly_chart(fig_top_order_revenue, use_container_width=True)
+    fig_order_revenue_hist.update_layout(
+        yaxis_title="Number of Orders",
+        xaxis_title="Order Revenue"
+    )
+    st.plotly_chart(fig_order_revenue_hist, use_container_width=True)
 
 with col2:
-    fig_top_order_quantity = px.bar(
-        top_orders_quantity.sort_values("Order_Quantity", ascending=True),
+    fig_order_quantity_hist = px.histogram(
+        order_hist,
         x="Order_Quantity",
-        y="InvoiceNo",
-        orientation="h",
-        title="Top 15 Orders by Quantity"
+        nbins=40,
+        title="Distribution of Order Quantity",
+        labels={"Order_Quantity": "Order Quantity"}
     )
-    st.plotly_chart(fig_top_order_quantity, use_container_width=True)
+    fig_order_quantity_hist.update_layout(
+        yaxis_title="Number of Orders",
+        xaxis_title="Order Quantity"
+    )
+    st.plotly_chart(fig_order_quantity_hist, use_container_width=True)
 
 top_order_id = top_orders_revenue.iloc[0]["InvoiceNo"]
 top_order_revenue = top_orders_revenue.iloc[0]["Order_Revenue"]
@@ -378,10 +393,13 @@ st.markdown(f"""
 The retailer generated **${total_revenue:,.0f}** from **{total_orders:,} orders** and **{total_customers:,} customers**.
 The average order value is **${average_order_value:,.2f}**.
 
+The order revenue distribution shows how invoice values are spread across the business. Most orders are concentrated
+in lower revenue ranges, while a smaller number of large orders appear in the upper tail.
+
 The largest order is invoice **{top_order_id}**, from **{top_order_country}**, with revenue of **${top_order_revenue:,.0f}**.
 The largest order by quantity is invoice **{top_quantity_order_id}**, from **{top_quantity_country}**, with **{top_quantity_value:,.0f} units**.
 
-These large orders are important because they may represent wholesale purchases. Since the company has many wholesale customers,
+These large orders may represent wholesale purchases. Since the company has many wholesale customers,
 a small number of large invoices can strongly affect revenue performance.
 
 The strongest revenue hour is around **{best_hour}:00**, generating **${best_hour_revenue:,.0f}**.
@@ -778,22 +796,43 @@ top_customers = customer_summary.sort_values("Revenue", ascending=False).head(15
 st.markdown("### Results: Top Customers by Revenue")
 st.dataframe(top_customers)
 
-fig_top_customers = px.bar(
-    top_customers.sort_values("Revenue", ascending=True),
-    x="Revenue",
-    y="CustomerID",
-    orientation="h",
-    title="Top 15 Customers by Revenue"
-)
-st.plotly_chart(fig_top_customers, use_container_width=True)
-
-customer_visual = customer_summary[
+customer_hist = customer_summary[
     (customer_summary["Revenue"] <= customer_summary["Revenue"].quantile(0.99))
     & (customer_summary["Orders"] <= customer_summary["Orders"].quantile(0.99))
 ].copy()
 
+col1, col2 = st.columns(2)
+
+with col1:
+    fig_customer_revenue_hist = px.histogram(
+        customer_hist,
+        x="Revenue",
+        nbins=40,
+        title="Distribution of Customer Revenue",
+        labels={"Revenue": "Customer Revenue"}
+    )
+    fig_customer_revenue_hist.update_layout(
+        yaxis_title="Number of Customers",
+        xaxis_title="Customer Revenue"
+    )
+    st.plotly_chart(fig_customer_revenue_hist, use_container_width=True)
+
+with col2:
+    fig_customer_orders_hist = px.histogram(
+        customer_hist,
+        x="Orders",
+        nbins=40,
+        title="Distribution of Orders per Customer",
+        labels={"Orders": "Orders per Customer"}
+    )
+    fig_customer_orders_hist.update_layout(
+        yaxis_title="Number of Customers",
+        xaxis_title="Orders per Customer"
+    )
+    st.plotly_chart(fig_customer_orders_hist, use_container_width=True)
+
 fig_customer_scatter = px.scatter(
-    customer_visual,
+    customer_hist,
     x="Orders",
     y="Revenue",
     size="Average_Order_Value",
@@ -819,6 +858,9 @@ st.markdown(f"""
 The highest-value customer is **{top_customer_id}** from **{top_customer_country}**.
 This customer generated **${top_customer_revenue:,.0f}** across **{top_customer_orders:,} orders**,
 representing approximately **{top_customer_share:.1f}%** of total revenue.
+
+The customer revenue distribution shows that most customers generate relatively modest revenue,
+while a smaller group of customers generates much higher value. This is typical in e-commerce and wholesale-oriented businesses.
 
 The top 20 customers generate approximately **{customer_top20_share:.1f}%** of total revenue.
 This indicates whether the business is highly dependent on a small group of customers.
